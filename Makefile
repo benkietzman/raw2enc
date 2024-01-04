@@ -11,7 +11,7 @@ prefix=/usr/local
 all: bin/passthru
 
 bin/passthru: ../common/libcommon.a obj/passthru.o bin
-	g++ -o bin/passthru obj/passthru.o $(LDFLAGS) -L../common -lcommon -lcrypto -lnsl -lssl
+	g++ -o bin/passthru obj/passthru.o $(LDFLAGS) -L../common -lcommon -lb64 -lcrypto -lexpat -lmjson -lnsl -lssl -ltar -lz
 
 bin:
 	if [ ! -d bin ]; then mkdir bin; fi;

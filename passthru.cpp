@@ -67,7 +67,7 @@ struct connection
   int fdIn;
   int fdOut;
   SSL *ssl;
-  string strBuffer[2];
+  string strBuffers[2];
 };
 // }}}
 // {{{ global variables
@@ -97,7 +97,7 @@ int main(int argc, char *argv[])
   signal(SIGWINCH, SIG_IGN);
   // }}}
   // {{{ command line arguments
-  for (int i = 1; i < argv; i++)
+  for (int i = 1; i < argc; i++)
   {
     string strArg = argv[i];
     if (strArg == "-d" || (strArg.size() > 7 && strArg.substr(0, 7) == "--data="))
@@ -258,14 +258,14 @@ int main(int argc, char *argv[])
             {
               fds[unIndex].fd = conn->fdIn;
               fds[unIndex].events = POLLIN;
-              if (!strBuffer[0].empty())
+              if (!conn->strBuffers[0].empty())
               {
                 fds[unIndex].events |= POLLOUT;
               }
               unIndex++;
               fds[unIndex].fd = conn->fdOut;
               fds[unIndex].events = POLLOUT;
-              if (!strBuffer[1].empty())
+              if (!conn->strBuffers[1].empty())
               {
                 fds[unIndex].events |= POLLOUT;
               }
@@ -279,7 +279,7 @@ int main(int argc, char *argv[])
                   }
                   else
                   {
-                    sslstrerror(conn->ssl, nReturn, conn->bRetry);
+                    utility.sslstrerror(conn->ssl, nReturn, conn->bRetry);
                     if (!conn->bRetry)
                     {
                       conn->bCloseOut = true;
@@ -310,7 +310,7 @@ int main(int argc, char *argv[])
                   ptConn->fdIn = fdClient;
                   ptConn->fdOut = -1;
                   ptConn->ssl = NULL;
-                  connections.push_back(ptConn);
+                  conns.push_back(ptConn);
                 }
                 else
                 {
@@ -347,7 +347,7 @@ int main(int argc, char *argv[])
                     // {{{ read
                     if (fds[i].revents & POLLIN)
                     {
-                      if (!utility->fdRead(fds[i].fd, (*connIter)->strBuffers[1], nReturn))
+                      if (!utility.fdRead(fds[i].fd, (*connIter)->strBuffers[1], nReturn))
                       {
                         (*connIter)->bCloseIn = true;
                       }
@@ -356,7 +356,7 @@ int main(int argc, char *argv[])
                     // {{{ write
                     if (fds[i].revents & POLLOUT)
                     {
-                      if (utility->fdWrite(fds[i].fd, (*connIter)->strBuffers[0], nReturn))
+                      if (utility.fdWrite(fds[i].fd, (*connIter)->strBuffers[0], nReturn))
                       {
                         if ((*connIter)->strBuffers[0].empty() && (*connIter)->bCloseOut)
                         {
@@ -377,7 +377,7 @@ int main(int argc, char *argv[])
                     // {{{ read
                     if (fds[i].revents & POLLIN)
                     {
-                      if (!utility->sslRead(fds[i].fd, (*connIter)->strBuffers[0], nReturn))
+                      if (!utility.sslRead((*connIter)->ssl, (*connIter)->strBuffers[0], nReturn))
                       {
                         (*connIter)->bCloseOut = true;
                       }
@@ -386,7 +386,7 @@ int main(int argc, char *argv[])
                     // {{{ write
                     if ((*connIter)->fdOut != -1 && fds[i].revents & POLLOUT)
                     {
-                      if (utility->fdWrite(fds[i].fd, (*connIter)->strBuffers[1], nReturn))
+                      if (utility.sslWrite((*connIter)->ssl, (*connIter)->strBuffers[1], nReturn))
                       {
                         if ((*connIter)->strBuffers[1].empty() && (*connIter)->bCloseIn)
                         {
@@ -409,14 +409,14 @@ int main(int argc, char *argv[])
             {
               bExit = true;
               ssMessage.str("");
-              ssMessage << strPrefix << "->poll(" << errno << ") error:  " << strerrorno(errno);
+              ssMessage << strPrefix << "->poll(" << errno << ") error:  " << strerror(errno);
             }
             // {{{ post work
-            for (auto i = conns.begin() i != conns.end(); i++)
+            for (auto i = conns.begin(); i != conns.end(); i++)
             {
               if ((*i)->bCloseIn && (*i)->fdIn != -1)
               {
-                close((*i)->fdIn;
+                close((*i)->fdIn);
                 (*i)->fdIn = -1;
               }
               if ((*i)->bCloseOut && (*i)->fdOut != -1)
@@ -437,7 +437,7 @@ int main(int argc, char *argv[])
             }
             while (!removals.empty())
             {
-              delete removals.front();
+              delete (*removals.front());
               removals.pop_front();
             }
             // }}}
@@ -498,7 +498,7 @@ int main(int argc, char *argv[])
       gpCentral->log(ssMessage.str());
     }
     // {{{ post work
-    sslDeinit();
+    utility.sslDeinit();
     delete gpCentral;
     // }}}
   }
