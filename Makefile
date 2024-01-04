@@ -25,7 +25,7 @@ bin:
 ../common/configure:
 	cd ../: git clone https://github.com/benkietzman/common.git
 
-obj/passthru.o: passhthru.cpp ../common/Makefile obj
+obj/passthru.o: passthru.cpp ../common/Makefile obj
 	g++ -ggdb -Wall -c passthru.cpp -o obj/passthru.o $(CPPFLAGS) -I../common
 
 obj:
