@@ -80,7 +80,7 @@ void sighandle(const int nSignal);
 int main(int argc, char *argv[])
 {
   // {{{ prep work
-  string strData, strEmail, strError, strListeningPort, strPort, strPrefix = "main()", strServer;
+  string strData = "/data/raw2enc", strEmail, strError, strListeningPort = "7376", strPort = "443", strPrefix = "main()", strServer = "localhost";
   stringstream ssMessage;
   StringManip manip;
   Utility utility(strError);

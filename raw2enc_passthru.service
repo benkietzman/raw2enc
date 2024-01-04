@@ -1,0 +1,13 @@
+[Unit]
+Description=raw2enc passthru daemon
+
+[Service]
+Type=simple
+ExecStartPre=/bin/cp /usr/local/raw2enc/passthru_preload /usr/local/raw2enc/passthru
+ExecStart=/usr/local/raw2enc/passthru
+Restart=always
+LimitNOFILE=65536
+User=raw2enc
+
+[Install]
+WantedBy=multi-user.target
