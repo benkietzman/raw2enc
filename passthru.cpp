@@ -265,11 +265,12 @@ int main(int argc, char *argv[])
               }
               unIndex++;
               fds[unIndex].fd = conn->fdOut;
-              fds[unIndex].events = POLLOUT;
+              fds[unIndex].events = POLLIN;
               if (!conn->strBuffers[1].empty())
               {
                 fds[unIndex].events |= POLLOUT;
               }
+              unIndex++;
               if (!conn->bCloseOut && (conn->ssl == NULL || conn->bRetry))
               {
                 if (conn->ssl == NULL)
