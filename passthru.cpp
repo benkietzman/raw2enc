@@ -440,7 +440,7 @@ int main(int argc, char *argv[])
             while (!removals.empty())
             {
               delete (*removals.front());
-              conns.erase(removals.front();
+              conns.erase(removals.front());
               removals.pop_front();
             }
             // }}}
