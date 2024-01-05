@@ -71,6 +71,7 @@ struct connection
 };
 // }}}
 // {{{ global variables
+bool gbShutdown = false;
 Central *gpCentral;
 // }}}
 // {{{ prototypes
@@ -246,7 +247,7 @@ int main(int argc, char *argv[])
           ssMessage << strPrefix << "->listen():  Listening to incoming socket.";
           gpCentral->log(ssMessage.str());
           // }}}
-          while (!bExit)
+          while (!gbShutdown && !bExit)
           {
             // {{{ prep work
             fds = new pollfd[conns.size()*2+1];
@@ -520,7 +521,8 @@ void sighandle(const int nSignal)
   stringstream ssMessage;
 
   sethandles(sigdummy);
-  ssMessage << "sighandle(" << nSignal << ":  " << sigstring(strSignal, nSignal);
+  gbShutdown = true;
+  ssMessage << "sighandle(" << nSignal << "):  " << sigstring(strSignal, nSignal);
   gpCentral->log(ssMessage.str());
 }
 // }}}
