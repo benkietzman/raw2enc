@@ -272,24 +272,24 @@ int main(int argc, char *argv[])
               }
               if (!conn->bCloseOut && (conn->ssl == NULL || conn->bRetry))
               {
-                if (conn->bRetry)
+                if (conn->ssl == NULL)
                 {
-                  if ((nReturn = SSL_connect(conn->ssl)) == 1)
+                  if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
                   {
-                    conn->bRetry = false;
-                  }
-                  else
-                  {
-                    utility.sslstrerror(conn->ssl, nReturn, conn->bRetry);
-                    if (!conn->bRetry)
-                    {
-                      conn->bCloseOut = true;
-                    }
+                    conn->bCloseOut = true;
                   }
                 }
-                else if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
+                else if ((nReturn = SSL_connect(conn->ssl)) == 1)
                 {
-                  conn->bCloseOut = true;
+                  conn->bRetry = false;
+                }
+                else
+                {
+                  utility.sslstrerror(conn->ssl, nReturn, conn->bRetry);
+                  if (!conn->bRetry)
+                  {
+                    conn->bCloseOut = true;
+                  }
                 }
               }
             }
@@ -413,6 +413,7 @@ int main(int argc, char *argv[])
               ssMessage << strPrefix << "->poll(" << errno << ") error:  " << strerror(errno);
             }
             // {{{ post work
+            delete[] fds;
             for (auto i = conns.begin(); i != conns.end(); i++)
             {
               if ((*i)->bCloseIn && (*i)->fdIn != -1)
@@ -439,6 +440,7 @@ int main(int argc, char *argv[])
             while (!removals.empty())
             {
               delete (*removals.front());
+              conns.erase(removals.front();
               removals.pop_front();
             }
             // }}}
