@@ -61,9 +61,13 @@ using namespace common;
 // {{{ structs
 struct connection
 {
+  addrinfo hints;
+  addrinfo *result;
+  addrinfo *rp;
   bool bCloseIn;
   bool bCloseOut;
   bool bRetry;
+  int fdConnecting;
   int fdIn;
   int fdOut;
   SSL *ssl;
@@ -168,8 +172,8 @@ int main(int argc, char *argv[])
       {
         strServer = strArg.substr(9, strArg.size() - 9);
       }
-      manip.purgeChar(strServer, strPort, "'");
-      manip.purgeChar(strServer, strPort, "\"");
+      manip.purgeChar(strServer, strServer, "'");
+      manip.purgeChar(strServer, strServer, "\"");
     }
     else if (strArg == "-v" || strArg == "--version")
     {
@@ -271,31 +275,75 @@ int main(int argc, char *argv[])
                 fds[unIndex].events |= POLLOUT;
               }
               unIndex++;
-              if (!conn->bCloseOut && (conn->ssl == NULL || conn->bRetry))
+              if (!conn->bCloseOut)
               {
-                if (conn->ssl == NULL)
+                if (conn->fdOut == -1)
                 {
-                  if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
+                  if (conn->rp == NULL)
+                  {
+                    memset(&(conn->hints), 0, sizeof(addrinfo));
+                    conn->hints.ai_family = AF_UNSPEC;
+                    conn->hints.ai_socktype = SOCK_STREAM;
+                    if ((nReturn = getaddrinfo(strServer.c_str(), strPort.c_str(), &(conn->hints), &(conn->result))) == 0)
+                    {
+                      conn->rp = conn->result;
+                    }
+                    else
+                    {
+                      conn->bCloseOut = true;
+                    }
+                  }
+                  else if (conn->fdConnecting == -1)
+                  {
+                    if ((conn->fdConnecting = socket(conn->rp->ai_family, conn->rp->ai_socktype, conn->rp->ai_protocol)) >= 0)
+                    {
+                      utility.fdNonBlocking(conn->fdConnecting, strError);
+                    }
+                    else
+                    {
+                      conn->rp = conn->rp->ai_next;
+                      if (conn->rp == NULL)
+                      {
+                        freeaddrinfo(conn->result);
+                        conn->bCloseOut = true;
+                      }
+                    }
+                  }
+                  else if (connect(conn->fdConnecting, conn->rp->ai_addr, conn->rp->ai_addrlen) == 0)
+                  {
+                    freeaddrinfo(conn->result);
+                    conn->fdOut = conn->fdConnecting;
+                    conn->fdConnecting = -1;
+                    if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
+                    {
+                      conn->bCloseOut = true;
+                    }
+                  }
+                  else if (errno != EAGAIN && errno != EALREADY && errno != EINPROGRESS)
                   {
                     conn->bCloseOut = true;
+                    freeaddrinfo(conn->result);
                   }
                 }
-                else if ((nReturn = SSL_connect(conn->ssl)) == 1)
+                if (conn->bRetry)
                 {
-                  conn->bRetry = false;
-                }
-                else
-                {
-                  utility.sslstrerror(conn->ssl, nReturn, conn->bRetry);
-                  if (!conn->bRetry)
+                  if ((nReturn = SSL_connect(conn->ssl)) == 1)
                   {
-                    conn->bCloseOut = true;
+                    conn->bRetry = false;
+                  }
+                  else
+                  {
+                    utility.sslstrerror(conn->ssl, nReturn, conn->bRetry);
+                    if (!conn->bRetry)
+                    {
+                      conn->bCloseOut = true;
+                    }
                   }
                 }
               }
             }
             // }}}
-            if ((nReturn = poll(fds, unIndex, 2000)) > 0)
+            if ((nReturn = poll(fds, unIndex, 100)) > 0)
             {
               // {{{ accept
               if (fds[0].revents & POLLIN)
@@ -309,8 +357,10 @@ int main(int argc, char *argv[])
                   ptConn->bCloseIn = false;
                   ptConn->bCloseOut = false;
                   ptConn->bRetry = false;
+                  ptConn->fdConnecting = -1;
                   ptConn->fdIn = fdClient;
                   ptConn->fdOut = -1;
+                  ptConn->rp = NULL;
                   ptConn->ssl = NULL;
                   conns.push_back(ptConn);
                 }
@@ -422,7 +472,7 @@ int main(int argc, char *argv[])
                 close((*i)->fdIn);
                 (*i)->fdIn = -1;
               }
-              if ((*i)->bCloseOut && (*i)->fdOut != -1)
+              if ((*i)->bCloseOut && ((*i)->fdConnecting == -1 || (*i)->fdOut != -1))
               {
                 if ((*i)->ssl != NULL)
                 {
@@ -430,8 +480,16 @@ int main(int argc, char *argv[])
                   SSL_free((*i)->ssl);
                   (*i)->ssl = NULL;
                 }
-                close((*i)->fdOut);
-                (*i)->fdOut = -1;
+                if ((*i)->fdConnecting != -1)
+                {
+                  close((*i)->fdConnecting);
+                  (*i)->fdConnecting = -1;
+                }
+                if ((*i)->fdOut != -1)
+                {
+                  close((*i)->fdOut);
+                  (*i)->fdOut = -1;
+                }
               }
               if ((*i)->bCloseIn && (*i)->fdIn == -1 && (*i)->bCloseOut && (*i)->fdOut == -1)
               {
@@ -452,6 +510,10 @@ int main(int argc, char *argv[])
             if (conns.front()->fdIn != -1)
             {
               close(conns.front()->fdIn);
+            }
+            if (conns.front()->fdConnecting != -1)
+            {
+              close(conns.front()->fdConnecting);
             }
             if (conns.front()->fdOut != -1)
             {
