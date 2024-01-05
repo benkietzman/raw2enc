@@ -432,7 +432,7 @@ int main(int argc, char *argv[])
                 close((*i)->fdOut);
                 (*i)->fdOut = -1;
               }
-              if (((*i)->bCloseIn && (*i)->fdIn == -1) && ((*i)->bCloseOut && (*i)->fdOut == -1))
+              if ((*i)->bCloseIn && (*i)->fdIn == -1 && (*i)->bCloseOut && (*i)->fdOut == -1)
               {
                 removals.push_back(i);
               }
