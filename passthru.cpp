@@ -61,9 +61,13 @@ using namespace common;
 // {{{ structs
 struct connection
 {
+  addrinfo hints;
+  addrinfo *result;
+  addrinfo *rp;
   bool bCloseIn;
   bool bCloseOut;
   bool bRetry;
+  int fdConnecting;
   int fdIn;
   int fdOut;
   SSL *ssl;
@@ -71,6 +75,7 @@ struct connection
 };
 // }}}
 // {{{ global variables
+bool gbShutdown = false;
 Central *gpCentral;
 // }}}
 // {{{ prototypes
@@ -167,8 +172,8 @@ int main(int argc, char *argv[])
       {
         strServer = strArg.substr(9, strArg.size() - 9);
       }
-      manip.purgeChar(strServer, strPort, "'");
-      manip.purgeChar(strServer, strPort, "\"");
+      manip.purgeChar(strServer, strServer, "'");
+      manip.purgeChar(strServer, strServer, "\"");
     }
     else if (strArg == "-v" || strArg == "--version")
     {
@@ -246,7 +251,7 @@ int main(int argc, char *argv[])
           ssMessage << strPrefix << "->listen():  Listening to incoming socket.";
           gpCentral->log(ssMessage.str());
           // }}}
-          while (!bExit)
+          while (!gbShutdown && !bExit)
           {
             // {{{ prep work
             fds = new pollfd[conns.size()*2+1];
@@ -264,13 +269,62 @@ int main(int argc, char *argv[])
               }
               unIndex++;
               fds[unIndex].fd = conn->fdOut;
-              fds[unIndex].events = POLLOUT;
+              fds[unIndex].events = POLLIN;
               if (!conn->strBuffers[1].empty())
               {
                 fds[unIndex].events |= POLLOUT;
               }
-              if (!conn->bCloseOut && (conn->ssl == NULL || conn->bRetry))
+              unIndex++;
+              if (!conn->bCloseOut)
               {
+                if (conn->fdOut == -1)
+                {
+                  if (conn->rp == NULL)
+                  {
+                    memset(&(conn->hints), 0, sizeof(addrinfo));
+                    conn->hints.ai_family = AF_UNSPEC;
+                    conn->hints.ai_socktype = SOCK_STREAM;
+                    if ((nReturn = getaddrinfo(strServer.c_str(), strPort.c_str(), &(conn->hints), &(conn->result))) == 0)
+                    {
+                      conn->rp = conn->result;
+                    }
+                    else
+                    {
+                      conn->bCloseOut = true;
+                    }
+                  }
+                  else if (conn->fdConnecting == -1)
+                  {
+                    if ((conn->fdConnecting = socket(conn->rp->ai_family, conn->rp->ai_socktype, conn->rp->ai_protocol)) >= 0)
+                    {
+                      utility.fdNonBlocking(conn->fdConnecting, strError);
+                    }
+                    else
+                    {
+                      conn->rp = conn->rp->ai_next;
+                      if (conn->rp == NULL)
+                      {
+                        freeaddrinfo(conn->result);
+                        conn->bCloseOut = true;
+                      }
+                    }
+                  }
+                  else if (connect(conn->fdConnecting, conn->rp->ai_addr, conn->rp->ai_addrlen) == 0)
+                  {
+                    freeaddrinfo(conn->result);
+                    conn->fdOut = conn->fdConnecting;
+                    conn->fdConnecting = -1;
+                    if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
+                    {
+                      conn->bCloseOut = true;
+                    }
+                  }
+                  else if (errno != EAGAIN && errno != EALREADY && errno != EINPROGRESS)
+                  {
+                    conn->bCloseOut = true;
+                    freeaddrinfo(conn->result);
+                  }
+                }
                 if (conn->bRetry)
                 {
                   if ((nReturn = SSL_connect(conn->ssl)) == 1)
@@ -286,14 +340,10 @@ int main(int argc, char *argv[])
                     }
                   }
                 }
-                else if ((conn->ssl = utility.sslConnect(ctx, conn->fdOut, conn->bRetry, strError)) == NULL)
-                {
-                  conn->bCloseOut = true;
-                }
               }
             }
             // }}}
-            if ((nReturn = poll(fds, unIndex, 2000)) > 0)
+            if ((nReturn = poll(fds, unIndex, 100)) > 0)
             {
               // {{{ accept
               if (fds[0].revents & POLLIN)
@@ -307,8 +357,10 @@ int main(int argc, char *argv[])
                   ptConn->bCloseIn = false;
                   ptConn->bCloseOut = false;
                   ptConn->bRetry = false;
+                  ptConn->fdConnecting = -1;
                   ptConn->fdIn = fdClient;
                   ptConn->fdOut = -1;
+                  ptConn->rp = NULL;
                   ptConn->ssl = NULL;
                   conns.push_back(ptConn);
                 }
@@ -412,6 +464,7 @@ int main(int argc, char *argv[])
               ssMessage << strPrefix << "->poll(" << errno << ") error:  " << strerror(errno);
             }
             // {{{ post work
+            delete[] fds;
             for (auto i = conns.begin(); i != conns.end(); i++)
             {
               if ((*i)->bCloseIn && (*i)->fdIn != -1)
@@ -419,7 +472,7 @@ int main(int argc, char *argv[])
                 close((*i)->fdIn);
                 (*i)->fdIn = -1;
               }
-              if ((*i)->bCloseOut && (*i)->fdOut != -1)
+              if ((*i)->bCloseOut && ((*i)->fdConnecting == -1 || (*i)->fdOut != -1))
               {
                 if ((*i)->ssl != NULL)
                 {
@@ -427,10 +480,18 @@ int main(int argc, char *argv[])
                   SSL_free((*i)->ssl);
                   (*i)->ssl = NULL;
                 }
-                close((*i)->fdOut);
-                (*i)->fdOut = -1;
+                if ((*i)->fdConnecting != -1)
+                {
+                  close((*i)->fdConnecting);
+                  (*i)->fdConnecting = -1;
+                }
+                if ((*i)->fdOut != -1)
+                {
+                  close((*i)->fdOut);
+                  (*i)->fdOut = -1;
+                }
               }
-              if (((*i)->bCloseIn && (*i)->fdIn == -1) && ((*i)->bCloseOut && (*i)->fdOut == -1))
+              if ((*i)->bCloseIn && (*i)->fdIn == -1 && (*i)->bCloseOut && (*i)->fdOut == -1)
               {
                 removals.push_back(i);
               }
@@ -438,6 +499,7 @@ int main(int argc, char *argv[])
             while (!removals.empty())
             {
               delete (*removals.front());
+              conns.erase(removals.front());
               removals.pop_front();
             }
             // }}}
@@ -448,6 +510,10 @@ int main(int argc, char *argv[])
             if (conns.front()->fdIn != -1)
             {
               close(conns.front()->fdIn);
+            }
+            if (conns.front()->fdConnecting != -1)
+            {
+              close(conns.front()->fdConnecting);
             }
             if (conns.front()->fdOut != -1)
             {
@@ -520,7 +586,8 @@ void sighandle(const int nSignal)
   stringstream ssMessage;
 
   sethandles(sigdummy);
-  ssMessage << "sighandle(" << nSignal << ":  " << sigstring(strSignal, nSignal);
+  gbShutdown = true;
+  ssMessage << "sighandle(" << nSignal << "):  " << sigstring(strSignal, nSignal);
   gpCentral->log(ssMessage.str());
 }
 // }}}
