@@ -338,7 +338,7 @@ int main(int argc, char *argv[])
               if (fds[0].revents & POLLIN)
               {
                 int fdClient;
-                sockaddr_in cli_addr;
+                sockaddr_in6 cli_addr;
                 socklen_t clilen = sizeof(cli_addr);
                 if ((fdClient = accept(fds[0].fd, (sockaddr *)&cli_addr, &clilen)) >= 0)
                 {
